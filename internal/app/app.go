@@ -84,7 +84,9 @@ type Services struct {
 	// Data.
 	SCPDataStorage              *datasvc.SCPDataStorageService
 	SCPDataStorageSharing       *sharingsvc.Service
-	DataProduct                 *datasvc.DataProductService
+	S3DataStorage               *datasvc.S3DataStorageService
+	S3DataStorageSharing        *sharingsvc.Service
+	DataProduct               *datasvc.DataProductService
 	DataProductSharing          *sharingsvc.Service
 	DataTransfer                *datasvc.DataTransferService
 	VirtualDataDirectory        *datasvc.VirtualDataDirectoryService
@@ -119,6 +121,7 @@ type Repositories struct {
 	Templates               *applicationrepo.TemplateRepository
 	BatchDeployments        *applicationrepo.BatchDeploymentRepository
 	SCPDataStorages         *datarepo.SCPDataStorageRepository
+	S3DataStorages          *datarepo.S3DataStorageRepository
 	DataProducts            *datarepo.DataProductRepository
 	VirtualDataDirectories  *datarepo.VirtualDataDirectoryRepository
 	VirtualDataFiles        *datarepo.VirtualDataFileRepository
@@ -145,6 +148,7 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		Templates:               applicationrepo.NewTemplateRepository(db),
 		BatchDeployments:        applicationrepo.NewBatchDeploymentRepository(db),
 		SCPDataStorages:         datarepo.NewSCPDataStorageRepository(db),
+		S3DataStorages:          datarepo.NewS3DataStorageRepository(db),
 		DataProducts:            datarepo.NewDataProductRepository(db),
 		VirtualDataDirectories:  datarepo.NewVirtualDataDirectoryRepository(db),
 		VirtualDataFiles:        datarepo.NewVirtualDataFileRepository(db),
@@ -175,6 +179,8 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 	templates := repos.Templates
 	deployments := repos.BatchDeployments
 	storages := repos.SCPDataStorages
+	s3Storages := repos.S3DataStorages
+	s3Credentials := repos.S3Credentials
 	shares := repos.Shares
 	products := repos.DataProducts
 	virtualDirs := repos.VirtualDataDirectories
@@ -190,6 +196,7 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 	statusSvc := processsvc.NewStatusService(db, statuses, processes)
 	configAccess := computesvc.NewConfigAccess(clusterConfigs, shares, groupMembers)
 	keyAccess := credentialssvc.NewKeyAccess(sshKeys)
+	s3CredentialAccess := credentialssvc.NewS3CredentialAccess(s3Credentials)
 	processSvs := processsvc.NewProcessService(db, processes, deployments, configAccess, users, statusSvc)
 	batchDeploymentSvc := applicationsvc.NewBatchDeploymentService(db, deployments, templates, clusters)
 	templateSvc := applicationsvc.NewTemplateService(db, templates, deployments)
@@ -199,6 +206,8 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 	clusterPartitionSvc := computesvc.NewClusterPartitionService(db, partitions, clusters)
 	scpDataStorageSvc := datasvc.NewSCPDataStorageService(db, storages, shares, keyAccess, products, users, groupMembers)
 	scpDataStorageSharingSvc := datasvc.NewSCPDataStorageSharingService(db, storages, shares, groups, users, groupMembers)
+	s3DataStorageSvc := datasvc.NewS3DataStorageService(db, s3Storages, shares, s3CredentialAccess, products, users, groupMembers)
+	s3DataStorageSharingSvc := datasvc.NewS3DataStorageSharingService(db, s3Storages, shares, groups, users, groupMembers)
 	dataProductSvc := datasvc.NewDataProductService(db, products, shares, storages, users, groupMembers)
 	dataProductSharingSvc := datasvc.NewDataProductSharingService(db, products, shares, groups, users, groupMembers)
 	dataTransferSvc := datasvc.NewDataTransferService(db, products, shares, storages, groupMembers, datasvc.NewSCPTransport())
@@ -206,8 +215,7 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 	virtualDataFileSvc := datasvc.NewVirtualDataFileService(db, virtualDirs, virtualFiles, shares, products, groupMembers)
 	virtualDataDirectorySharingSvc := datasvc.NewVirtualDataDirectorySharingService(db, virtualDirs, shares, groups, users, groupMembers)
 	sshKeySvc := credentialssvc.NewSSHKeyService(sshKeys, users, clusterConfigs, storages)
-	// Nothing presents an S3 credential yet; the S3 data storage will be its referrer.
-	s3CredentialSvc := credentialssvc.NewS3CredentialService(repos.S3Credentials, users)
+	s3CredentialSvc := credentialssvc.NewS3CredentialService(s3Credentials, users, s3Storages)
 
 	executionEngine := orchestration.NewExecutionEngine(stagingTasks, submissionTasks,
 		monitoringTasks, storages, clusterConfigs, processes, deployments, templates, batchStatus, statuses, workflowBackend)
@@ -236,6 +244,8 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 
 		SCPDataStorage:        scpDataStorageSvc,
 		SCPDataStorageSharing: scpDataStorageSharingSvc,
+		S3DataStorage:         s3DataStorageSvc,
+		S3DataStorageSharing:  s3DataStorageSharingSvc,
 		DataProduct:           dataProductSvc,
 		DataProductSharing:    dataProductSharingSvc,
 		DataTransfer:          dataTransferSvc,

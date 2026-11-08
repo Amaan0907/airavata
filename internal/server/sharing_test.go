@@ -40,6 +40,7 @@ func TestSharingIsUniformAcrossResources(t *testing.T) {
 	productID := productOut["dataId"].(string)
 	directoryID := h.seedDataset("uniform", tokenAlice)
 	configID, _ := h.seedClusterConfig(tokenAlice, "uniform")
+	_, s3StorageID := h.seedS3Storage("uniform", tokenAlice)
 
 	groupID := h.seedGroup("uniform-team", tokenAlice)
 	h.mustDo(http.MethodPost, "/api/v1/groups/"+groupID+"/members", tokenAlice,
@@ -54,6 +55,7 @@ func TestSharingIsUniformAcrossResources(t *testing.T) {
 		{"/api/v1/data-products/" + productID, sharingmodel.ResourceTypeDataProduct, productID},
 		{"/api/v1/virtual-data-directories/" + directoryID, sharingmodel.ResourceTypeVirtualDataDirectory, directoryID},
 		{"/api/v1/slurm-cluster-configs/" + configID, sharingmodel.ResourceTypeSlurmClusterConfig, configID},
+		{"/api/v1/s3-data-storages/" + s3StorageID, sharingmodel.ResourceTypeS3DataStorage, s3StorageID},
 	} {
 		userShare := h.mustDo(http.MethodPost, res.base+"/shares", tokenAlice,
 			map[string]any{"principalType": "USER", "principalId": "bob", "permission": "READ"},
