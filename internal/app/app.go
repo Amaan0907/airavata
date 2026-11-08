@@ -68,7 +68,8 @@ type Services struct {
 	GroupMember *iamsvc.GroupMemberService
 
 	// Credentials.
-	SSHKey *credentialssvc.SSHKeyService
+	SSHKey       *credentialssvc.SSHKeyService
+	S3Credential *credentialssvc.S3CredentialService
 
 	// Compute.
 	SlurmCluster              *computesvc.SlurmClusterService
@@ -111,7 +112,8 @@ type Repositories struct {
 	Groups                  *iamrepo.GroupRepository
 	GroupMembers            *iamrepo.GroupMemberRepository
 	SSHKeys                 *credentialsrepo.SSHKeyRepository
-	SlurmClusters           *computerepo.SlurmClusterRepository
+	S3Credentials           *credentialsrepo.S3CredentialRepository
+	SlurmClusters         *computerepo.SlurmClusterRepository
 	ClusterPartitions       *computerepo.ClusterPartitionRepository
 	SlurmClusterConfigs     *computerepo.SlurmClusterConfigRepository
 	Templates               *applicationrepo.TemplateRepository
@@ -136,6 +138,7 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		Groups:                  iamrepo.NewGroupRepository(db),
 		GroupMembers:            iamrepo.NewGroupMemberRepository(db),
 		SSHKeys:                 credentialsrepo.NewSSHKeyRepository(db),
+		S3Credentials:           credentialsrepo.NewS3CredentialRepository(db),
 		SlurmClusters:           computerepo.NewSlurmClusterRepository(db),
 		ClusterPartitions:       computerepo.NewClusterPartitionRepository(db),
 		SlurmClusterConfigs:     computerepo.NewSlurmClusterConfigRepository(db),
@@ -203,6 +206,8 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 	virtualDataFileSvc := datasvc.NewVirtualDataFileService(db, virtualDirs, virtualFiles, shares, products, groupMembers)
 	virtualDataDirectorySharingSvc := datasvc.NewVirtualDataDirectorySharingService(db, virtualDirs, shares, groups, users, groupMembers)
 	sshKeySvc := credentialssvc.NewSSHKeyService(sshKeys, users, clusterConfigs, storages)
+	// Nothing presents an S3 credential yet; the S3 data storage will be its referrer.
+	s3CredentialSvc := credentialssvc.NewS3CredentialService(repos.S3Credentials, users)
 
 	executionEngine := orchestration.NewExecutionEngine(stagingTasks, submissionTasks,
 		monitoringTasks, storages, clusterConfigs, processes, deployments, templates, batchStatus, statuses, workflowBackend)
@@ -218,7 +223,8 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 
 		// A key is deleted only when nothing presents it, and what can present one
 		// lives in other verticals — hence both repositories here.
-		SSHKey: sshKeySvc,
+		SSHKey:       sshKeySvc,
+		S3Credential: s3CredentialSvc,
 
 		SlurmCluster:              slurmClusterSvc,
 		ClusterPartition:          clusterPartitionSvc,

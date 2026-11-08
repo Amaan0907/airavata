@@ -18,7 +18,7 @@
 * under the License.
  */
 
-// Package model holds the SSH key entity.
+// Package model holds the credential entities: SSH keys and S3 access keys.
 package model
 
 import (
