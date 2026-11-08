@@ -88,6 +88,7 @@ type Services struct {
 	S3DataStorageSharing        *sharingsvc.Service
 	DataProduct               *datasvc.DataProductService
 	DataProductSharing          *sharingsvc.Service
+	DataProductReplica          *datasvc.DataProductReplicaService
 	DataTransfer                *datasvc.DataTransferService
 	VirtualDataDirectory        *datasvc.VirtualDataDirectoryService
 	VirtualDataFile             *datasvc.VirtualDataFileService
@@ -123,6 +124,7 @@ type Repositories struct {
 	SCPDataStorages         *datarepo.SCPDataStorageRepository
 	S3DataStorages          *datarepo.S3DataStorageRepository
 	DataProducts            *datarepo.DataProductRepository
+	DataProductReplicas     *datarepo.DataProductReplicaRepository
 	VirtualDataDirectories  *datarepo.VirtualDataDirectoryRepository
 	VirtualDataFiles        *datarepo.VirtualDataFileRepository
 	Shares                  *sharingrepo.Repository
@@ -150,6 +152,7 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		SCPDataStorages:         datarepo.NewSCPDataStorageRepository(db),
 		S3DataStorages:          datarepo.NewS3DataStorageRepository(db),
 		DataProducts:            datarepo.NewDataProductRepository(db),
+		DataProductReplicas:     datarepo.NewDataProductReplicaRepository(db),
 		VirtualDataDirectories:  datarepo.NewVirtualDataDirectoryRepository(db),
 		VirtualDataFiles:        datarepo.NewVirtualDataFileRepository(db),
 		Shares:                  sharingrepo.NewRepository(db),
@@ -183,6 +186,7 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 	s3Credentials := repos.S3Credentials
 	shares := repos.Shares
 	products := repos.DataProducts
+	replicas := repos.DataProductReplicas
 	virtualDirs := repos.VirtualDataDirectories
 	virtualFiles := repos.VirtualDataFiles
 	processes := repos.Processes
@@ -208,7 +212,8 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 	scpDataStorageSharingSvc := datasvc.NewSCPDataStorageSharingService(db, storages, shares, groups, users, groupMembers)
 	s3DataStorageSvc := datasvc.NewS3DataStorageService(db, s3Storages, shares, s3CredentialAccess, products, users, groupMembers)
 	s3DataStorageSharingSvc := datasvc.NewS3DataStorageSharingService(db, s3Storages, shares, groups, users, groupMembers)
-	dataProductSvc := datasvc.NewDataProductService(db, products, shares, storages, users, groupMembers)
+	dataProductSvc := datasvc.NewDataProductService(db, products, shares, storages, replicas, users, groupMembers)
+	dataProductReplicaSvc := datasvc.NewDataProductReplicaService(db, products, shares, replicas, storages, s3Storages, groupMembers)
 	dataProductSharingSvc := datasvc.NewDataProductSharingService(db, products, shares, groups, users, groupMembers)
 	dataTransferSvc := datasvc.NewDataTransferService(db, products, shares, storages, groupMembers, datasvc.NewSCPTransport())
 	virtualDataDirectorySvc := datasvc.NewVirtualDataDirectoryService(db, virtualDirs, virtualFiles, shares, products, users, groupMembers)
@@ -248,6 +253,7 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 		S3DataStorageSharing:  s3DataStorageSharingSvc,
 		DataProduct:           dataProductSvc,
 		DataProductSharing:    dataProductSharingSvc,
+		DataProductReplica:    dataProductReplicaSvc,
 		DataTransfer:          dataTransferSvc,
 
 		VirtualDataDirectory:        virtualDataDirectorySvc,
