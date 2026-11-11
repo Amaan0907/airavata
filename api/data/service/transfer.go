@@ -397,11 +397,17 @@ func (s *DataTransferService) objectStore(ctx context.Context, storageID string)
 	if err != nil {
 		return nil, notFoundAs(err, "S3 data storage not found: %s", storageID)
 	}
+	return openS3Storage(s.openStore, storage)
+}
+
+// openS3Storage opens a loaded storage's bucket under its credential. The credential
+// goes no further than the client open returns.
+func openS3Storage(open ObjectStoreOpener, storage *model.S3DataStorage) (objectstore.Store, error) {
 	cfg, err := orchestration.S3StoreConfig(storage)
 	if err != nil {
-		return nil, httpx.Conflict("S3 data storage %s is missing the credential a transfer needs", storage.ID)
+		return nil, httpx.Conflict("S3 data storage %s is missing the credential it needs", storage.ID)
 	}
-	store, err := s.openStore(cfg)
+	store, err := open(cfg)
 	if err != nil {
 		return nil, upstream(err, "Could not open S3 data storage %s", storage.ID)
 	}

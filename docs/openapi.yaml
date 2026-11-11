@@ -1518,6 +1518,64 @@ paths:
         "502": { $ref: "#/components/responses/BadGateway" }
         "500": { $ref: "#/components/responses/InternalError" }
 
+  /api/v1/s3-data-storages/{dataStorageId}/objects:
+    parameters:
+      - $ref: "#/components/parameters/DataStorageId"
+    get:
+      tags: [S3 Data Storages]
+      summary: Browse the objects in an S3 data storage
+      description: |
+        Lists one level of the storage's bucket, read live through this server under
+        the storage's credential. Keys are split at `/`: what lies under `prefix` up
+        to the next `/` is a folder, and an object directly under it is a file.
+        Objects whose key ends in `/` (folder markers) are left out, so a page can
+        hold fewer than `maxKeys` entries.
+
+        Requires a `READ` standing on the storage. A share on a data product in the
+        bucket is not enough.
+
+        To keep track of a file, register it as a data product with
+        `dataStorageType: S3` and `path` set to its `key`.
+      operationId: listS3Objects
+      parameters:
+        - name: prefix
+          in: query
+          description: |
+            The folder to list, e.g. `runs/2024/`; empty for the top. Passed to S3 as
+            it is. At most 1024 bytes, no control characters.
+          schema: { type: string, maxLength: 1024 }
+        - name: continuationToken
+          in: query
+          description: The `nextContinuationToken` of the previous page.
+          schema: { type: string, maxLength: 4096 }
+        - name: maxKeys
+          in: query
+          description: Folders and files per page together.
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 1000 }
+      responses:
+        "200":
+          description: One page of the level.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/S3ObjectListingResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The storage has no credential.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502":
+          description: |
+            The S3 service could not be reached or refused the request, including a
+            bucket that does not exist or a continuation token it does not accept.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
   /api/v1/data-products:
     get:
       tags: [Data Products]
@@ -3677,6 +3735,43 @@ components:
           description: The caller's effective standing.
           enum: [READ, WRITE]
       required: [dataId, region, bucketName, pathStyle]
+
+    S3ObjectListingResponse:
+      type: object
+      description: One page of one level of a bucket.
+      properties:
+        dataStorageId: { type: string, format: uuid }
+        prefix: { type: string }
+        folders:
+          type: array
+          items: { $ref: "#/components/schemas/S3FolderResponse" }
+        files:
+          type: array
+          items: { $ref: "#/components/schemas/S3ObjectResponse" }
+        nextContinuationToken:
+          type: [string, "null"]
+          description: Pass as `continuationToken` for the next page; `null` on the last.
+      required: [dataStorageId, prefix, folders, files, nextContinuationToken]
+
+    S3FolderResponse:
+      type: object
+      properties:
+        name: { type: string, description: "The folder's last segment." }
+        prefix: { type: string, description: "The prefix that lists the folder's contents." }
+      required: [name, prefix]
+
+    S3ObjectResponse:
+      type: object
+      properties:
+        name: { type: string, description: "The key's last segment." }
+        key: { type: string, description: "The full object key; the path to register a data product at." }
+        size: { type: integer, format: int64 }
+        etag: { type: string }
+        lastModified:
+          type: integer
+          format: int64
+          description: Milliseconds since the epoch; 0 when the service reported none.
+      required: [name, key, size, etag, lastModified]
 
     DataProductRequest:
       type: object

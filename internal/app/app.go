@@ -86,6 +86,7 @@ type Services struct {
 	SCPDataStorageSharing       *sharingsvc.Service
 	S3DataStorage               *datasvc.S3DataStorageService
 	S3DataStorageSharing        *sharingsvc.Service
+	S3Object                    *datasvc.S3ObjectService
 	DataProduct                 *datasvc.DataProductService
 	DataProductSharing          *sharingsvc.Service
 	DataProductReplica          *datasvc.DataProductReplicaService
@@ -212,6 +213,7 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 	scpDataStorageSharingSvc := datasvc.NewSCPDataStorageSharingService(db, storages, shares, groups, users, groupMembers)
 	s3DataStorageSvc := datasvc.NewS3DataStorageService(db, s3Storages, shares, s3CredentialAccess, products, users, groupMembers)
 	s3DataStorageSharingSvc := datasvc.NewS3DataStorageSharingService(db, s3Storages, shares, groups, users, groupMembers)
+	s3ObjectSvc := datasvc.NewS3ObjectService(s3Storages, shares, groupMembers, orchestration.OpenS3Store)
 	dataProductSvc := datasvc.NewDataProductService(db, products, shares, storages, s3Storages, replicas, users, groupMembers)
 	dataProductReplicaSvc := datasvc.NewDataProductReplicaService(db, products, shares, replicas, storages, s3Storages, groupMembers)
 	dataProductSharingSvc := datasvc.NewDataProductSharingService(db, products, shares, groups, users, groupMembers)
@@ -252,6 +254,7 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 		SCPDataStorageSharing: scpDataStorageSharingSvc,
 		S3DataStorage:         s3DataStorageSvc,
 		S3DataStorageSharing:  s3DataStorageSharingSvc,
+		S3Object:              s3ObjectSvc,
 		DataProduct:           dataProductSvc,
 		DataProductSharing:    dataProductSharingSvc,
 		DataProductReplica:    dataProductReplicaSvc,

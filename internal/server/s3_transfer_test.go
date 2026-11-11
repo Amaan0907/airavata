@@ -28,9 +28,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/apache/airavata/internal/objectstore"
 )
@@ -113,9 +115,60 @@ func (b *fakeBucket) Upload(_ context.Context, localPath, key string) error {
 	return nil
 }
 
-func (b *fakeBucket) List(context.Context, objectstore.ListOptions) (*objectstore.Listing, error) {
-	return &objectstore.Listing{}, nil
+// List follows S3's ListObjectsV2: keys in order, everything past the prefix up to the
+// delimiter rolled into one common prefix, and a page ending at MaxKeys entries. The
+// continuation token is the last entry of the previous page.
+func (b *fakeBucket) List(_ context.Context, opts objectstore.ListOptions) (*objectstore.Listing, error) {
+	if b.f.err != nil {
+		return nil, b.f.err
+	}
+	b.f.mu.Lock()
+	var keys []string
+	sizes := map[string]int64{}
+	for key, content := range b.f.objects[b.bucket] {
+		if strings.HasPrefix(key, opts.Prefix) {
+			keys = append(keys, key)
+			sizes[key] = int64(len(content))
+		}
+	}
+	b.f.mu.Unlock()
+	sort.Strings(keys)
+
+	maxKeys := opts.MaxKeys
+	if maxKeys <= 0 {
+		maxKeys = objectstore.DefaultMaxKeys
+	}
+	out := &objectstore.Listing{}
+	seen := map[string]bool{}
+	last := ""
+	for _, key := range keys {
+		entry, isPrefix := key, false
+		if opts.Delimiter != "" {
+			if i := strings.Index(key[len(opts.Prefix):], opts.Delimiter); i >= 0 {
+				entry, isPrefix = key[:len(opts.Prefix)+i+len(opts.Delimiter)], true
+			}
+		}
+		if seen[entry] || (opts.ContinuationToken != "" && entry <= opts.ContinuationToken) {
+			continue
+		}
+		if len(out.Objects)+len(out.CommonPrefixes) == maxKeys {
+			out.NextContinuationToken = last
+			break
+		}
+		seen[entry], last = true, entry
+		if isPrefix {
+			out.CommonPrefixes = append(out.CommonPrefixes, entry)
+		} else {
+			out.Objects = append(out.Objects, objectstore.ObjectInfo{
+				Key: key, Size: sizes[key], ETag: "etag-" + key, LastModified: fakeModified,
+			})
+		}
+	}
+	return out, nil
 }
+
+// fakeModified is the time every fake object was last written.
+var fakeModified = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 
 // An S3 product's content goes up to the object its path names and comes back from it,
 // through this server, under the storage's credential.

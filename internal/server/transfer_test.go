@@ -104,8 +104,9 @@ func (h *harness) withFakeTransport() *fakeTransport {
 	return fake
 }
 
-// withFakeTransfers replaces the transfer service with one moving bytes through a fake
-// SCP transport and fake S3 buckets, and rebuilds the routes over it.
+// withFakeTransfers replaces every service that reaches a storage — the content
+// transfers and the bucket listing — with ones working through a fake SCP transport
+// and fake S3 buckets, and rebuilds the routes over them.
 func (h *harness) withFakeTransfers() (*fakeTransport, *fakeBuckets) {
 	h.t.Helper()
 	fake, buckets := newFakeTransport(), newFakeBuckets()
@@ -113,6 +114,7 @@ func (h *harness) withFakeTransfers() (*fakeTransport, *fakeBuckets) {
 	h.svcs.DataTransfer = datasvc.NewDataTransferService(
 		h.db, repos.DataProducts, repos.Shares, repos.SCPDataStorages, repos.S3DataStorages,
 		repos.GroupMembers, fake, buckets.open)
+	h.svcs.S3Object = datasvc.NewS3ObjectService(repos.S3DataStorages, repos.Shares, repos.GroupMembers, buckets.open)
 	h.rebuild()
 	return fake, buckets
 }

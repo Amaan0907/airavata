@@ -1324,9 +1324,57 @@ The credential is inlined as its safe summary — the secret access key and sess
 
 `DELETE` returns `204 No Content`. Deleting a storage takes its shares with it. Sharing works exactly as for [SCP data storages](#share-an-scp-data-storage), under `/api/v1/s3-data-storages/{dataStorageId}/shares`.
 
+### Browse an S3 Data Storage
+
+```
+GET /api/v1/s3-data-storages/{dataStorageId}/objects?prefix=&continuationToken=&maxKeys=
+```
+
+Lists what is in the storage's bucket, one level at a time, read live from the bucket through this server under the storage's credential. Nothing is copied into the database. Requires a `READ` standing **on the storage**: a share on one data product in the bucket is not enough, since a listing shows everything beside it.
+
+S3 has no folders, only keys. A listing splits keys at `/`: everything under `prefix` up to the next `/` comes back once as a **folder**, and an object directly under `prefix` comes back as a **file**. To open a folder, list again with its `prefix`.
+
+| Parameter | |
+|---|---|
+| `prefix` | the folder to list, such as `runs/2024/`; empty for the top of the bucket. Passed to S3 as it is, so a prefix not ending in `/` matches the start of names. At most 1024 bytes, no control characters |
+| `continuationToken` | the `nextContinuationToken` of the previous page |
+| `maxKeys` | folders and files per page, 1 to 1000; defaults to 1000 |
+
+```bash
+curl -s "localhost:9095/api/v1/s3-data-storages/$S3_STORAGE_ID/objects?prefix=runs/" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "dataStorageId": "5b0e...",
+  "prefix": "runs/",
+  "folders": [{ "name": "2024", "prefix": "runs/2024/" }],
+  "files": [
+    { "name": "reads.fasta", "key": "runs/reads.fasta", "size": 41943040, "etag": "9b2c...", "lastModified": 1767323045000 }
+  ],
+  "nextContinuationToken": null
+}
+```
+
+`nextContinuationToken` is `null` on the last page. `lastModified` is in milliseconds since the epoch.
+
+An object whose key ends in `/` is not listed as a file. Such objects are the zero-byte folder markers that S3 consoles create so a folder can exist while it is empty; the folder itself still appears, through its prefix, one level up. Because of this a page can hold fewer entries than `maxKeys`.
+
+To keep track of an object, register it as a [data product](#create-data-product) with `dataStorageType: "S3"`, `dataStorageId` set to the storage and `path` set to the file's `key`. From then on it can be shared, staged into runs and [downloaded](#upload-and-download-data-product-content) like any other product.
+
+| Status | When |
+|---|---|
+| `400 Bad Request` | a query parameter fails the rules above |
+| `401 Unauthorized` | no token |
+| `403 Forbidden` | no `READ` standing on the storage |
+| `404 Not Found` | no such storage |
+| `409 Conflict` | the storage has no credential |
+| `502 Bad Gateway` | the S3 service could not be reached or refused the request, including a bucket that does not exist or a continuation token it does not accept |
+
 ## Data Products
 
-A data product is a registered dataset: a path on an [SCP data storage](#scp-data-storages), owned by whoever registered it.
+A data product is a registered dataset: a path on an [SCP data storage](#scp-data-storages) or an object key on an [S3 data storage](#s3-data-storages), owned by whoever registered it.
 
 | Standing | May do |
 |---|---|
