@@ -78,16 +78,6 @@ func TestProductCanLiveOnS3(t *testing.T) {
 	}
 }
 
-// The content endpoint still reads SCP only. It must refuse an S3 product plainly
-// rather than reach for the wrong table.
-func TestContentOfAnS3ProductIsRefused(t *testing.T) {
-	h := newHarness(t)
-	_, productID := h.seedS3Product("content", tokenAlice)
-	if rec := h.download(productID, tokenAlice); rec.Code != http.StatusBadRequest {
-		t.Errorf("download of an S3 product: status = %d, want 400", rec.Code)
-	}
-}
-
 func TestStagingTasksMayNameS3(t *testing.T) {
 	h := newHarness(t)
 	processID := h.seedProcess("s3-staging", tokenAlice)

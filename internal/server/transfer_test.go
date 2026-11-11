@@ -97,16 +97,24 @@ func (f *fakeTransport) touched() bool {
 	return len(f.downloads)+len(f.uploads)+len(f.dirs) > 0
 }
 
-// withFakeTransport replaces the transfer service with one moving bytes through a
-// fake, and rebuilds the routes over it.
+// withFakeTransport is withFakeTransfers for a test that moves SCP bytes only.
 func (h *harness) withFakeTransport() *fakeTransport {
 	h.t.Helper()
-	fake := newFakeTransport()
+	fake, _ := h.withFakeTransfers()
+	return fake
+}
+
+// withFakeTransfers replaces the transfer service with one moving bytes through a fake
+// SCP transport and fake S3 buckets, and rebuilds the routes over it.
+func (h *harness) withFakeTransfers() (*fakeTransport, *fakeBuckets) {
+	h.t.Helper()
+	fake, buckets := newFakeTransport(), newFakeBuckets()
 	repos := app.NewRepositories(h.db)
 	h.svcs.DataTransfer = datasvc.NewDataTransferService(
-		h.db, repos.DataProducts, repos.Shares, repos.SCPDataStorages, repos.GroupMembers, fake)
+		h.db, repos.DataProducts, repos.Shares, repos.SCPDataStorages, repos.S3DataStorages,
+		repos.GroupMembers, fake, buckets.open)
 	h.rebuild()
-	return fake
+	return fake, buckets
 }
 
 // upload issues a raw-body PUT, which is the shape `curl --data-binary` sends.

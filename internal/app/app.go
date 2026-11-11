@@ -215,7 +215,8 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 	dataProductSvc := datasvc.NewDataProductService(db, products, shares, storages, s3Storages, replicas, users, groupMembers)
 	dataProductReplicaSvc := datasvc.NewDataProductReplicaService(db, products, shares, replicas, storages, s3Storages, groupMembers)
 	dataProductSharingSvc := datasvc.NewDataProductSharingService(db, products, shares, groups, users, groupMembers)
-	dataTransferSvc := datasvc.NewDataTransferService(db, products, shares, storages, groupMembers, datasvc.NewSCPTransport())
+	dataTransferSvc := datasvc.NewDataTransferService(db, products, shares, storages, s3Storages, groupMembers,
+		datasvc.NewSCPTransport(), orchestration.OpenS3Store)
 	virtualDataDirectorySvc := datasvc.NewVirtualDataDirectoryService(db, virtualDirs, virtualFiles, shares, products, users, groupMembers)
 	virtualDataFileSvc := datasvc.NewVirtualDataFileService(db, virtualDirs, virtualFiles, shares, products, groupMembers)
 	virtualDataDirectorySharingSvc := datasvc.NewVirtualDataDirectorySharingService(db, virtualDirs, shares, groups, users, groupMembers)

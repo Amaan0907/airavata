@@ -120,7 +120,7 @@ func NewExecutionEngine(dataStagingTasks *processrepo.DataStagingTaskRepository,
 		orchestrator:        orchestrator,
 		batchStatus:         batchStatus,
 		processStatus:       processStatus,
-		openObjectStore:     openS3Store,
+		openObjectStore:     OpenS3Store,
 	}
 }
 

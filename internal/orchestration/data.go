@@ -208,15 +208,16 @@ func (a *ExecutionEngine) objectStoreFor(ctx context.Context, storageID string) 
 	if err != nil {
 		return nil, fmt.Errorf("loading S3 data storage %s: %w", storageID, err)
 	}
-	cfg, err := s3StoreConfig(storage)
+	cfg, err := S3StoreConfig(storage)
 	if err != nil {
 		return nil, err
 	}
 	return a.openObjectStore(cfg)
 }
 
-// s3StoreConfig is the client configuration for a storage and its credential.
-func s3StoreConfig(storage *datamodel.S3DataStorage) (objectstore.Config, error) {
+// S3StoreConfig is the client configuration for a storage and its credential. It is
+// shared with the REST content endpoint, which opens the same buckets.
+func S3StoreConfig(storage *datamodel.S3DataStorage) (objectstore.Config, error) {
 	cred := storage.S3Credential
 	if cred == nil {
 		return objectstore.Config{}, fmt.Errorf("S3 data storage %s names no credential", storage.ID)
@@ -232,7 +233,8 @@ func s3StoreConfig(storage *datamodel.S3DataStorage) (objectstore.Config, error)
 	}, nil
 }
 
-// openS3Store is the store an engine opens unless a test replaces it.
-func openS3Store(cfg objectstore.Config) (objectstore.Store, error) {
+// OpenS3Store opens a bucket over the network. It is what an engine and the content
+// endpoint use unless a test replaces it.
+func OpenS3Store(cfg objectstore.Config) (objectstore.Store, error) {
 	return objectstore.New(cfg)
 }

@@ -33,6 +33,8 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/apache/airavata/internal/httpx"
+	"github.com/apache/airavata/internal/objectstore"
+	"github.com/apache/airavata/internal/orchestration"
 
 	credmodel "github.com/apache/airavata/api/credentials/model"
 	dto "github.com/apache/airavata/api/data/dto"
@@ -59,6 +61,11 @@ type Transport interface {
 	MakeDirectory(ctx context.Context, ep Endpoint, remoteDir string) error
 }
 
+// ObjectStoreOpener opens the bucket a configuration names. It is the S3 counterpart of
+// Transport: the server opens it with the storage's credential, and the bytes pass
+// through here, so a caller never holds the credential or a presigned URL.
+type ObjectStoreOpener func(objectstore.Config) (objectstore.Store, error)
+
 // Download is the handle a caller streams a product's bytes from.
 type Download struct {
 	FileName string
@@ -80,21 +87,35 @@ func (f *stagedFile) Close() error {
 	return err
 }
 
-type DataTransferService struct {
-	productAccess
-	db        *gorm.DB
-	storages  *repository.SCPDataStorageRepository
-	transport Transport
+// location is one place a product's bytes are read from or written to.
+type location struct {
+	storageType model.DataStorageType
+	storageID   string
+
+	// path is a file path on an SCP storage and an object key on an S3 one.
+	path string
 }
 
-// NewDataTransferService returns a transfer service moving bytes through transport.
+type DataTransferService struct {
+	productAccess
+	db         *gorm.DB
+	storages   *repository.SCPDataStorageRepository
+	s3Storages *repository.S3DataStorageRepository
+	transport  Transport
+	openStore  ObjectStoreOpener
+}
+
+// NewDataTransferService returns a transfer service moving bytes through transport for
+// SCP storages and through the stores openStore opens for S3 ones.
 func NewDataTransferService(
 	db *gorm.DB,
 	products *repository.DataProductRepository,
 	sharing *sharingrepo.Repository,
 	storages *repository.SCPDataStorageRepository,
+	s3Storages *repository.S3DataStorageRepository,
 	members *iamrepo.GroupMemberRepository,
 	transport Transport,
+	openStore ObjectStoreOpener,
 ) *DataTransferService {
 	return &DataTransferService{
 		productAccess: productAccess{
@@ -102,13 +123,15 @@ func NewDataTransferService(
 			products: products,
 			sharing:  sharing,
 		},
-		db:        db,
-		storages:  storages,
-		transport: transport,
+		db:         db,
+		storages:   storages,
+		s3Storages: s3Storages,
+		transport:  transport,
+		openStore:  openStore,
 	}
 }
 
-// Download stages the product's remote file locally and returns a handle to it.
+// Download stages the product's file locally and returns a handle to it.
 func (s *DataTransferService) Download(ctx context.Context, id string) (*Download, error) {
 	product, err := s.requireProduct(ctx, id)
 	if err != nil {
@@ -117,7 +140,7 @@ func (s *DataTransferService) Download(ctx context.Context, id string) (*Downloa
 	if _, _, err := s.require(ctx, product, sharingmodel.AccessPermissionRead); err != nil {
 		return nil, err
 	}
-	remotePath, ep, err := s.locate(ctx, product)
+	from, err := downloadLocation(product)
 	if err != nil {
 		return nil, err
 	}
@@ -130,9 +153,9 @@ func (s *DataTransferService) Download(ctx context.Context, id string) (*Downloa
 	// itself: nothing else knows about it yet.
 	staged := filepath.Join(dir, "content")
 
-	if err := s.transport.Download(ctx, ep, remotePath, staged); err != nil {
+	if err := s.fetch(ctx, product, from, staged); err != nil {
 		os.RemoveAll(dir)
-		return nil, upstream(err, "Could not read data product %s from %s", product.ID, ep.Host)
+		return nil, err
 	}
 
 	file, err := os.Open(staged)
@@ -148,13 +171,13 @@ func (s *DataTransferService) Download(ctx context.Context, id string) (*Downloa
 	}
 
 	return &Download{
-		FileName:   path.Base(remotePath),
+		FileName:   path.Base(from.path),
 		Size:       info.Size(),
 		ReadCloser: &stagedFile{File: file, dir: dir},
 	}, nil
 }
 
-// Upload writes content to the product's remote path, replacing whatever was there.
+// Upload writes content to the product's primary location, replacing whatever was there.
 func (s *DataTransferService) Upload(ctx context.Context, id string, content io.Reader) (*dto.DataProductResponse, error) {
 	product, err := s.requireProduct(ctx, id)
 	if err != nil {
@@ -164,7 +187,7 @@ func (s *DataTransferService) Upload(ctx context.Context, id string, content io.
 	if err != nil {
 		return nil, err
 	}
-	remotePath, ep, err := s.locate(ctx, product)
+	to, err := uploadLocation(product)
 	if err != nil {
 		return nil, err
 	}
@@ -175,16 +198,8 @@ func (s *DataTransferService) Upload(ctx context.Context, id string, content io.
 	}
 	defer cleanup()
 
-	// The parent directory is created first for the same reason a staging task creates
-	// it: a product may name a path under a directory that no run has made yet, and
-	// scp will not make it.
-	if remoteDir := path.Dir(remotePath); remoteDir != "." && remoteDir != "/" {
-		if err := s.transport.MakeDirectory(ctx, ep, remoteDir); err != nil {
-			return nil, upstream(err, "Could not create %s on %s for data product %s", remoteDir, ep.Host, product.ID)
-		}
-	}
-	if err := s.transport.Upload(ctx, ep, staged, remotePath); err != nil {
-		return nil, upstream(err, "Could not write data product %s to %s", product.ID, ep.Host)
+	if err := s.deliver(ctx, product, to, staged); err != nil {
+		return nil, err
 	}
 
 	provisioned := model.ProvisionStatusProvisioned
@@ -195,6 +210,76 @@ func (s *DataTransferService) Upload(ctx context.Context, id string, content io.
 
 	out := dto.ToDataProductResponseWith(product, string(held))
 	return &out, nil
+}
+
+// fetch copies the file at from to localPath.
+func (s *DataTransferService) fetch(ctx context.Context, product *model.DataProduct, from location, localPath string) error {
+	switch from.storageType {
+	case model.DataStorageTypeSCP:
+		ep, err := s.scpEndpoint(ctx, from.storageID)
+		if err != nil {
+			return err
+		}
+		if err := s.transport.Download(ctx, ep, from.path, localPath); err != nil {
+			return upstream(err, "Could not read data product %s from %s", product.ID, ep.Host)
+		}
+		return nil
+
+	case model.DataStorageTypeS3:
+		store, err := s.objectStore(ctx, from.storageID)
+		if err != nil {
+			return err
+		}
+		if err := store.Download(ctx, from.path, localPath); err != nil {
+			// Unlike SCP, S3 says plainly when the object is missing: the product was
+			// registered but nothing has been written to it yet.
+			if errors.Is(err, objectstore.ErrNotFound) {
+				return httpx.NotFound("Data product %s has no content at its S3 location yet", product.ID)
+			}
+			return upstream(err, "Could not read data product %s from S3 data storage %s", product.ID, from.storageID)
+		}
+		return nil
+
+	default:
+		return unsupportedStorage(product, from.storageType)
+	}
+}
+
+// deliver copies localPath to the file at to.
+func (s *DataTransferService) deliver(ctx context.Context, product *model.DataProduct, to location, localPath string) error {
+	switch to.storageType {
+	case model.DataStorageTypeSCP:
+		ep, err := s.scpEndpoint(ctx, to.storageID)
+		if err != nil {
+			return err
+		}
+		// The parent directory is created first for the same reason a staging task
+		// creates it: a product may name a path under a directory that no run has made
+		// yet, and scp will not make it.
+		if remoteDir := path.Dir(to.path); remoteDir != "." && remoteDir != "/" {
+			if err := s.transport.MakeDirectory(ctx, ep, remoteDir); err != nil {
+				return upstream(err, "Could not create %s on %s for data product %s", remoteDir, ep.Host, product.ID)
+			}
+		}
+		if err := s.transport.Upload(ctx, ep, localPath, to.path); err != nil {
+			return upstream(err, "Could not write data product %s to %s", product.ID, ep.Host)
+		}
+		return nil
+
+	case model.DataStorageTypeS3:
+		// A bucket has no directories to make: the key's prefix is part of its name.
+		store, err := s.objectStore(ctx, to.storageID)
+		if err != nil {
+			return err
+		}
+		if err := store.Upload(ctx, localPath, to.path); err != nil {
+			return upstream(err, "Could not write data product %s to S3 data storage %s", product.ID, to.storageID)
+		}
+		return nil
+
+	default:
+		return unsupportedStorage(product, to.storageType)
+	}
 }
 
 // stage writes content to a temporary file and returns its path with the function that
@@ -229,31 +314,66 @@ func stage(content io.Reader, productID string) (string, func(), error) {
 	return name, cleanup, nil
 }
 
-func (s *DataTransferService) locate(ctx context.Context, product *model.DataProduct) (string, Endpoint, error) {
-	var ep Endpoint
-
+// requireFile refuses a directory product. A directory moves as a tree, which neither
+// single-file SCP nor a single S3 object does, and refusing it beats transferring the
+// one file a recursive copy would have started with.
+func requireFile(product *model.DataProduct) error {
 	if !product.IsFile {
-		return "", ep, httpx.BadRequest(
+		return httpx.BadRequest(
 			"Data product %s is a directory: only a file data product can be uploaded or downloaded", product.ID)
 	}
-	if product.Path == nil || *product.Path == "" {
-		return "", ep, httpx.Conflict("Data product %s names no path to transfer", product.ID)
+	return nil
+}
+
+// downloadLocation is where a product's bytes are read from: its first replica, which is
+// the primary when there is one and the oldest other replica when there is not. It is
+// the same choice a job launch makes when it stages the product as an input.
+func downloadLocation(product *model.DataProduct) (location, error) {
+	if err := requireFile(product); err != nil {
+		return location{}, err
 	}
-	if product.DataStorageType != model.DataStorageTypeSCP {
-		return "", ep, httpx.BadRequest(
-			"Data product %s lives on %s storage, which cannot be transferred through this API",
-			product.ID, product.DataStorageType)
+	if len(product.Replicas) == 0 {
+		return location{}, httpx.Conflict("Data product %s names no location to transfer from", product.ID)
+	}
+	replica := product.Replicas[0]
+	return location{storageType: replica.DataStorageType, storageID: replica.DataStorageID, path: replica.Path}, nil
+}
+
+// uploadLocation is where new bytes for a product are written: its primary location
+// only. Other replicas are copies the caller registered, and are not rewritten here.
+func uploadLocation(product *model.DataProduct) (location, error) {
+	if err := requireFile(product); err != nil {
+		return location{}, err
+	}
+	if product.Path == nil || *product.Path == "" {
+		return location{}, httpx.Conflict("Data product %s names no path to transfer", product.ID)
 	}
 	if product.DataStorageID == nil {
-		return "", ep, httpx.Conflict("Data product %s names no storage to transfer through", product.ID)
+		return location{}, httpx.Conflict("Data product %s names no storage to transfer through", product.ID)
 	}
+	// A product registered before the type was recorded is on SCP, the only kind there was.
+	storageType := product.DataStorageType
+	if storageType == "" {
+		storageType = model.DataStorageTypeSCP
+	}
+	return location{storageType: storageType, storageID: *product.DataStorageID, path: *product.Path}, nil
+}
 
-	storage, err := s.storages.FindByID(ctx, *product.DataStorageID)
+func unsupportedStorage(product *model.DataProduct, storageType model.DataStorageType) error {
+	return httpx.BadRequest(
+		"Data product %s lives on %s storage, which cannot be transferred through this API",
+		product.ID, storageType)
+}
+
+// scpEndpoint is the host and account an SCP storage is reached through.
+func (s *DataTransferService) scpEndpoint(ctx context.Context, storageID string) (Endpoint, error) {
+	var ep Endpoint
+	storage, err := s.storages.FindByID(ctx, storageID)
 	if err != nil {
-		return "", ep, notFoundAs(err, "SCP data storage not found: %s", *product.DataStorageID)
+		return ep, notFoundAs(err, "SCP data storage not found: %s", storageID)
 	}
 	if storage.HostName == nil || storage.LoginUser == nil || storage.SSHKey == nil {
-		return "", ep, httpx.Conflict(
+		return ep, httpx.Conflict(
 			"SCP data storage %s is missing the host, login user or key a transfer needs", storage.ID)
 	}
 
@@ -261,7 +381,7 @@ func (s *DataTransferService) locate(ctx context.Context, product *model.DataPro
 	if storage.Port != nil && *storage.Port != 0 {
 		port = *storage.Port
 	}
-	return *product.Path, Endpoint{
+	return Endpoint{
 		Host:      *storage.HostName,
 		Port:      port,
 		LoginUser: *storage.LoginUser,
@@ -269,9 +389,28 @@ func (s *DataTransferService) locate(ctx context.Context, product *model.DataPro
 	}, nil
 }
 
+// objectStore opens the bucket an S3 storage names, under the credential it presents.
+// As with an SCP storage's key, a share on the product is enough: the caller is never
+// given the storage or its credential, only the one object the product names.
+func (s *DataTransferService) objectStore(ctx context.Context, storageID string) (objectstore.Store, error) {
+	storage, err := s.s3Storages.FindByID(ctx, storageID)
+	if err != nil {
+		return nil, notFoundAs(err, "S3 data storage not found: %s", storageID)
+	}
+	cfg, err := orchestration.S3StoreConfig(storage)
+	if err != nil {
+		return nil, httpx.Conflict("S3 data storage %s is missing the credential a transfer needs", storage.ID)
+	}
+	store, err := s.openStore(cfg)
+	if err != nil {
+		return nil, upstream(err, "Could not open S3 data storage %s", storage.ID)
+	}
+	return store, nil
+}
+
 // upstream reports a failure of the host a transfer ran against rather than of the
-// request. The cause is wrapped rather than written into the message: an SSH failure
-// names internal state, and the handler logs anything at 500 or above.
+// request. The cause is wrapped rather than written into the message: an SSH or S3
+// failure names internal state, and the handler logs anything at 500 or above.
 func upstream(err error, format string, args ...any) *httpx.Error {
 	return &httpx.Error{
 		Status:  http.StatusBadGateway,

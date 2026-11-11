@@ -29,8 +29,8 @@ import (
 // have several, on storages of different kinds.
 //
 // Exactly one is primary, and it mirrors the DataStorageID, DataStorageType and Path
-// columns on the product itself, which job launches and the content endpoint still
-// read. Its id is the product's id: that keeps a product to a single primary row
+// columns on the product itself. Job outputs and content uploads are written there;
+// inputs and downloads read the first replica, which is the primary when there is one. Its id is the product's id: that keeps a product to a single primary row
 // without a partial index, and lets the backfill of existing products run repeatedly
 // without generating ids.
 //

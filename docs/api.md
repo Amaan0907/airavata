@@ -43,7 +43,7 @@ The statuses in use:
 | `404 Not Found` | no such record — or, for [groups](#groups), a record the caller has no standing to know exists |
 | `409 Conflict` | the request collides with existing state, e.g. deleting an SSH key still in use |
 | `413 Content Too Large` | the body ran past a size cap — only [data product content](#upload-and-download-data-product-content) has one |
-| `502 Bad Gateway` | an upstream could not be reached: the identity provider when validating a token, or the storage host when [transferring data product content](#upload-and-download-data-product-content). Not the caller's fault either way |
+| `502 Bad Gateway` | an upstream could not be reached: the identity provider when validating a token, or the storage host or S3 service when [transferring data product content](#upload-and-download-data-product-content). Not the caller's fault either way |
 
 Internal failures return `500` with a fixed `"Internal server error"` message: the underlying detail is logged rather than returned, since it may name internal state.
 
@@ -1405,16 +1405,21 @@ GET /api/v1/data-products/{dataProductId}/content
 PUT /api/v1/data-products/{dataProductId}/content
 ```
 
-The routes above register *where* a dataset lives; these two move the bytes. The content is fetched from — or written to — the product's `path` on its [storage](#scp-data-storages), over the same SCP implementation a [data staging task](#create-data-staging-task) uses.
+The routes above register *where* a dataset lives; these two move the bytes, through this server, on an [SCP](#scp-data-storages) or an [S3](#s3-data-storages) storage. Each uses the same client a [data staging task](#create-data-staging-task) does, and the caller never receives a credential or a presigned URL.
+
+- **Download** reads the product's first [replica](#data-product-replicas): its primary location, or the oldest other replica when it has none, which is the same choice a launch makes for an input.
+- **Upload** writes the primary location (`path` on `dataStorageId`) only. Other replicas are left as they are, so after an upload they hold the old bytes until you replace or remove them. A product with no primary location is `409 Conflict`.
 
 | Route | Standing needed |
 |---|---|
 | `GET .../content` | `READ` on the product |
 | `PUT .../content` | `WRITE` on the product |
 
-**The standing is on the product, and nothing else.** A product names a storage and that storage names an SSH key, but no standing on the storage is required and the key is never exposed: the platform reaches the host under the credential the storage owner registered, exactly as a staging task does. Requiring a storage share as well would make sharing a product useless on its own, and sharing the storage instead would hand over every dataset on that host rather than the one meant.
+**The standing is on the product, and nothing else.** A product names a storage and that storage names an SSH key or an S3 credential, but no standing on the storage is required and the credential is never exposed: the platform reaches the host under the credential the storage owner registered, exactly as a staging task does. Requiring a storage share as well would make sharing a product useless on its own, and sharing the storage instead would hand over every dataset on that host rather than the one meant.
 
-Only a **file** product can be transferred — `isFile: false` is `400`, because a directory moves as a tree and single-file SCP does not do that.
+Only a **file** product can be transferred — `isFile: false` is `400`, because a directory moves as a tree, and neither single-file SCP nor a single S3 object does that.
+
+On S3, downloading an object that has not been written yet is `404 Not Found`. A store that cannot be reached is `502 Bad Gateway`, as an unreachable SCP host is.
 
 **Download**
 
@@ -1424,7 +1429,7 @@ curl -s -X GET localhost:9095/api/v1/data-products/"$DATA_PRODUCT_ID"/content \
   -o sample.fasta
 ```
 
-The response is `application/octet-stream` with `Content-Length` set and `Content-Disposition: attachment; filename=<basename of the product's path>`.
+The response is `application/octet-stream` with `Content-Length` set and `Content-Disposition: attachment; filename=<last segment of the path or object key>`.
 
 **Upload**
 
@@ -1492,7 +1497,7 @@ DELETE /api/v1/data-products/{dataProductId}/replicas/{replicaId}   (WRITE)
 
 The **primary** replica is the location in the product's own `dataStorageId`, `dataStorageType` and `path`. It is created with the product and moves when the product is updated, so it cannot be added or removed here. Either kind of replica may be on an SCP or an [S3](#s3-data-storages) storage.
 
-When a run is launched, a file input is staged from the product's first replica — the primary one, or the oldest replica when the product has no primary — and a file output is staged to the product's primary location. Every copy goes through the server, so a cluster only ever receives data over SCP and never sees an S3 credential. The [content endpoint](#upload-and-download-data-product-content) still reads and writes the primary location on SCP only: for a product on S3 it answers `400 Bad Request`.
+When a run is launched, a file input is staged from the product's first replica — the primary one, or the oldest replica when the product has no primary — and a file output is staged to the product's primary location. Every copy goes through the server, so a cluster only ever receives data over SCP and never sees an S3 credential. The [content endpoint](#upload-and-download-data-product-content) follows the same rule: downloads read the first replica and uploads write the primary.
 
 Adding a replica needs `WRITE` on the product and `READ` on the storage it names, the same rule as registering a product on that storage. It records where the data is and does not copy anything.
 

@@ -1731,11 +1731,13 @@ paths:
       tags: [Data Products]
       summary: Download a data product's content
       description: |
-        Streams the file the product names, fetched from its storage over SCP.
+        Streams the file the product names, fetched through this server from its
+        first replica: the primary location, or the oldest other replica when the
+        product has none. The replica may be on an SCP or an S3 storage.
 
         Requires a `READ` standing **on the product**. No standing on the storage is
-        needed: the platform reaches the host under the credential the storage owner
-        registered, and that key is never exposed. Requiring a storage share as well
+        needed: the platform reaches the host or bucket under the credential the
+        storage owner registered, and that credential is never exposed. Requiring a storage share as well
         would make sharing a product useless on its own; granting one instead would
         hand over every dataset on that host.
 
@@ -1744,32 +1746,38 @@ paths:
       responses:
         "200":
           description: |
-            The file's bytes. `Content-Disposition` names the basename of the
-            product's remote path.
+            The file's bytes. `Content-Disposition` names the last segment of the
+            path or object key.
           headers:
             Content-Disposition:
               schema: { type: string }
-              description: '`attachment; filename=<basename of the product path>`'
+              description: '`attachment; filename=<last segment of the path or key>`'
           content:
             application/octet-stream:
               schema: { type: string, format: binary }
         "400":
-          description: The product is a directory, or does not live on SCP storage.
+          description: The product is a directory, or lives on a storage type that cannot be transferred.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/NotFound" }
+        "404":
+          description: |
+            The product or its storage does not exist, or the S3 object it names has
+            not been written yet.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "409":
           description: |
-            The product names no path, or its storage is missing the host, login user
-            or key a transfer needs.
+            The product names no location, or its storage is missing the host, login
+            user, key or S3 credential a transfer needs.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "502":
-          description: The storage host could not be reached, or refused the transfer.
+          description: The storage host or S3 service could not be reached, or refused the transfer.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -1778,9 +1786,10 @@ paths:
       tags: [Data Products]
       summary: Upload a data product's content
       description: |
-        Writes the body to the path the product names, replacing whatever was there,
-        and moves the product to `PROVISIONED`. A failed transfer leaves the status
-        alone. Missing parent directories are created first.
+        Writes the body to the product's primary location, replacing whatever was
+        there, and moves the product to `PROVISIONED`. A failed transfer leaves the
+        status alone. On SCP, missing parent directories are created first; on S3 the
+        object key is written as is. Other replicas are not rewritten.
 
         Requires a `WRITE` standing **on the product** — the same standing editing the
         record takes, since the path is part of the record. As with the download, no
@@ -1813,8 +1822,8 @@ paths:
               schema: { $ref: "#/components/schemas/DataProductResponse" }
         "400":
           description: |
-            The product is a directory, does not live on SCP storage, or the body
-            could not be read.
+            The product is a directory, lives on a storage type that cannot be
+            transferred, or the body could not be read.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -1823,8 +1832,8 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
           description: |
-            The product names no path, or its storage is missing the host, login user
-            or key a transfer needs.
+            The product has no primary location, or its storage is missing the host,
+            login user, key or S3 credential a transfer needs.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -1834,7 +1843,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "502":
-          description: The storage host could not be reached, or refused the transfer.
+          description: The storage host or S3 service could not be reached, or refused the transfer.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
