@@ -40,6 +40,7 @@ import (
 	appserv "github.com/apache/airavata/api/application/service"
 	computesev "github.com/apache/airavata/api/compute/service"
 	credentialsev "github.com/apache/airavata/api/credentials/service"
+	datadto "github.com/apache/airavata/api/data/dto"
 	datasev "github.com/apache/airavata/api/data/service"
 
 	datamodel "github.com/apache/airavata/api/data/model"
@@ -283,11 +284,16 @@ func (s *LaunchService) launchBatchProcess(ctx context.Context, process *dto.Res
 			retryCount := 3
 			taskOrder := 0
 
+			source, err := stagingSource(dataProduct)
+			if err != nil {
+				return err
+			}
+
 			dataStagingTask := &procmodel.DataStagingTask{
 				ProcessID:             &process.ProcessID,
-				SourceDataStorageID:   dataProduct.DataStorageID,
-				SourcePath:            dataProduct.Path,
-				SourceDataStorageType: &dataProduct.DataStorageType,
+				SourceDataStorageID:   &source.DataStorageID,
+				SourcePath:            &source.Path,
+				SourceDataStorageType: &source.DataStorageType,
 
 				DestinationDataStorageID:   &clusterConfig.SlurmClusterConfigID,
 				DestinationDataStorageType: &hpcStorageType,
@@ -336,8 +342,12 @@ func (s *LaunchService) launchBatchProcess(ctx context.Context, process *dto.Res
 
 			// Create a data staging task for the file output
 
+			destStorageID, destStorageType, destPath, err := stagingDestination(dataProduct)
+			if err != nil {
+				return err
+			}
+
 			sourcePath := workingDir + "/" + *&tempOutput.OutputName
-			destStorageType := datamodel.DataStorageTypeSCP
 			failureAction := procmodel.OnFailureActionRetry
 			retryCount := 3
 			taskOrder := 4
@@ -347,9 +357,9 @@ func (s *LaunchService) launchBatchProcess(ctx context.Context, process *dto.Res
 				SourcePath:            &sourcePath,
 				SourceDataStorageType: &hpcStorageType,
 
-				DestinationDataStorageID:   dataProduct.DataStorageID,
+				DestinationDataStorageID:   &destStorageID,
 				DestinationDataStorageType: &destStorageType,
-				DestinationPath:            dataProduct.Path,
+				DestinationPath:            &destPath,
 				OnFailure:                  &failureAction,
 				RetryCount:                 &retryCount,
 				TaskOrder:                  &taskOrder,
@@ -413,4 +423,29 @@ func findTemplateOutput(template *appdto.TemplateResponse, outputID string) *app
 		}
 	}
 	return nil
+}
+
+// stagingSource picks where a file input is staged from. Replicas come primary first,
+// so this is the product's primary location when it has one and its oldest replica
+// otherwise. Any kind of location will do: every copy goes through this server, so the
+// cluster receives the file over SCP whichever storage it came from.
+func stagingSource(product *datadto.DataProductResponse) (*datadto.DataProductReplicaResponse, error) {
+	if len(product.Replicas) == 0 {
+		return nil, httpx.Conflict("Data product %s names no location to stage from", product.DataID)
+	}
+	return &product.Replicas[0], nil
+}
+
+// stagingDestination is where a file output is staged to: the product's primary
+// location, which may be an SCP or an S3 storage. A product registered before the type
+// was recorded is on SCP, the only kind there was.
+func stagingDestination(product *datadto.DataProductResponse) (string, datamodel.DataStorageType, string, error) {
+	if product.DataStorageID == nil || product.Path == nil || *product.Path == "" {
+		return "", "", "", httpx.Conflict("Data product %s names no location to stage to", product.DataID)
+	}
+	storageType := product.DataStorageType
+	if storageType == "" {
+		storageType = datamodel.DataStorageTypeSCP
+	}
+	return *product.DataStorageID, storageType, *product.Path, nil
 }

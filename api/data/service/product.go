@@ -105,10 +105,11 @@ func (a productAccess) requireControl(ctx context.Context, product *model.DataPr
 // products that were never shared with them.
 type DataProductService struct {
 	productAccess
-	db       *gorm.DB
-	storages *repository.SCPDataStorageRepository
-	replicas *repository.DataProductReplicaRepository
-	users    *iamrepo.UserRepository
+	db         *gorm.DB
+	storages   *repository.SCPDataStorageRepository
+	s3Storages *repository.S3DataStorageRepository
+	replicas   *repository.DataProductReplicaRepository
+	users      *iamrepo.UserRepository
 }
 
 // NewDataProductService returns a data product service.
@@ -117,6 +118,7 @@ func NewDataProductService(
 	products *repository.DataProductRepository,
 	sharing *sharingrepo.Repository,
 	storages *repository.SCPDataStorageRepository,
+	s3Storages *repository.S3DataStorageRepository,
 	replicas *repository.DataProductReplicaRepository,
 	users *iamrepo.UserRepository,
 	members *iamrepo.GroupMemberRepository,
@@ -127,10 +129,11 @@ func NewDataProductService(
 			products: products,
 			sharing:  sharing,
 		},
-		db:       db,
-		storages: storages,
-		replicas: replicas,
-		users:    users,
+		db:         db,
+		storages:   storages,
+		s3Storages: s3Storages,
+		replicas:   replicas,
+		users:      users,
 	}
 }
 
@@ -311,18 +314,14 @@ func (s *DataProductService) Delete(ctx context.Context, id string) error {
 	})
 }
 
-// resolveReferences checks the storage a request names.
+// resolveReferences checks the storage a request names, in the table its type says.
 //
 // It has to be reachable by the caller, and the reference carries no foreign key — the
 // storage id is qualified by a storage *type* — so this is the only thing standing
-// between a request and a dangling one. The host and the account the dataset is reached
-// under come from the storage itself, so there is nothing else here to agree with.
+// between a request and a dangling one. Where and how the dataset is reached come from
+// the storage itself, so there is nothing else here to agree with.
 func (s *DataProductService) resolveReferences(ctx context.Context, tx *gorm.DB, req *dto.DataProductRequest) error {
-	storage, err := s.storages.WithTx(tx).FindByID(ctx, req.DataStorageID)
-	if err != nil {
-		return notFoundAs(err, "SCP data storage not found: %s", req.DataStorageID)
-	}
-	return requireStorageReadable(ctx, s.access.WithTx(tx), s.sharing.WithTx(tx), storage)
+	return requireLocationReadable(ctx, tx, s.access, s.sharing, s.storages, s.s3Storages, req.StorageType(), req.DataStorageID)
 }
 
 // syncPrimaryReplica makes the primary replica match the location on the product, and

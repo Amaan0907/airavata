@@ -3098,7 +3098,10 @@ components:
       enum: [READ, WRITE]
     DataStorageType:
       type: string
-      enum: [SCP, HPC]
+      description: |
+        `SCP` and `S3` are storages a data product can live on. `HPC` names a Slurm
+        cluster config, and appears only on the cluster end of a data staging task.
+      enum: [SCP, HPC, S3]
     ProvisionStatus:
       type: string
       description: |
@@ -3679,7 +3682,9 @@ components:
         path: { type: string }
         dataStorageId: { type: string, format: uuid }
         dataStorageType:
-          description: Defaults to `SCP`, the only kind `dataStorageId` resolves against.
+          description: |
+            `SCP` or `S3`; defaults to `SCP`. `HPC` is refused: a cluster is where data
+            is staged for a run, not somewhere a product lives.
           oneOf:
             - { $ref: "#/components/schemas/DataStorageType" }
             - { type: "null" }

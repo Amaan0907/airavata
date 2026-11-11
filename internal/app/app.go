@@ -86,7 +86,7 @@ type Services struct {
 	SCPDataStorageSharing       *sharingsvc.Service
 	S3DataStorage               *datasvc.S3DataStorageService
 	S3DataStorageSharing        *sharingsvc.Service
-	DataProduct               *datasvc.DataProductService
+	DataProduct                 *datasvc.DataProductService
 	DataProductSharing          *sharingsvc.Service
 	DataProductReplica          *datasvc.DataProductReplicaService
 	DataTransfer                *datasvc.DataTransferService
@@ -116,7 +116,7 @@ type Repositories struct {
 	GroupMembers            *iamrepo.GroupMemberRepository
 	SSHKeys                 *credentialsrepo.SSHKeyRepository
 	S3Credentials           *credentialsrepo.S3CredentialRepository
-	SlurmClusters         *computerepo.SlurmClusterRepository
+	SlurmClusters           *computerepo.SlurmClusterRepository
 	ClusterPartitions       *computerepo.ClusterPartitionRepository
 	SlurmClusterConfigs     *computerepo.SlurmClusterConfigRepository
 	Templates               *applicationrepo.TemplateRepository
@@ -212,7 +212,7 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 	scpDataStorageSharingSvc := datasvc.NewSCPDataStorageSharingService(db, storages, shares, groups, users, groupMembers)
 	s3DataStorageSvc := datasvc.NewS3DataStorageService(db, s3Storages, shares, s3CredentialAccess, products, users, groupMembers)
 	s3DataStorageSharingSvc := datasvc.NewS3DataStorageSharingService(db, s3Storages, shares, groups, users, groupMembers)
-	dataProductSvc := datasvc.NewDataProductService(db, products, shares, storages, replicas, users, groupMembers)
+	dataProductSvc := datasvc.NewDataProductService(db, products, shares, storages, s3Storages, replicas, users, groupMembers)
 	dataProductReplicaSvc := datasvc.NewDataProductReplicaService(db, products, shares, replicas, storages, s3Storages, groupMembers)
 	dataProductSharingSvc := datasvc.NewDataProductSharingService(db, products, shares, groups, users, groupMembers)
 	dataTransferSvc := datasvc.NewDataTransferService(db, products, shares, storages, groupMembers, datasvc.NewSCPTransport())
@@ -223,7 +223,7 @@ func NewServices(cfg config.Config, db *gorm.DB, repos *Repositories, workflowBa
 	s3CredentialSvc := credentialssvc.NewS3CredentialService(s3Credentials, users, s3Storages)
 
 	executionEngine := orchestration.NewExecutionEngine(stagingTasks, submissionTasks,
-		monitoringTasks, storages, clusterConfigs, processes, deployments, templates, batchStatus, statuses, workflowBackend)
+		monitoringTasks, storages, s3Storages, clusterConfigs, processes, deployments, templates, batchStatus, statuses, workflowBackend)
 	executionEngine.StartEngine()
 
 	return &Services{

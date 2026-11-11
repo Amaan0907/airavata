@@ -1236,7 +1236,7 @@ An S3 data storage is a bucket on an S3-compatible object store — AWS S3, MinI
 
 It follows the [SCP data storage](#scp-data-storages) rules: the same standings, the same `/me` and `/shared-with-me` listings, the same admin-only unfiltered listing, and the same sharing sub-resource. Putting a credential on a storage requires owning it, while a `WRITE` grantee may edit a storage and keep the credential already on it — the rule [SSH keys](#ssh-keys) follow on SCP storages.
 
-Clusters never see the credential. Data on an S3 storage is staged by Airavata itself, which pulls the object and pushes it to the cluster over SCP. A [data product](#data-products) cannot have an S3 storage as its primary location yet, but can name one as a [replica](#data-product-replicas).
+Clusters never see the credential. Data on an S3 storage is staged by Airavata itself, which pulls the object and pushes it to the cluster over SCP. A [data product](#data-products) can live on an S3 storage, as its primary location or as a [replica](#data-product-replicas), and a run stages it in and out the same way it does SCP data.
 
 ```
 GET    /api/v1/s3-data-storages                                   (admin)
@@ -1370,7 +1370,7 @@ curl -s -X POST localhost:9095/api/v1/data-products \
 | `isFile` | boolean | required; `false` for a directory |
 | `path` | string | required, cannot be blank |
 | `dataStorageId` | string | required, must reference a storage the caller can reach |
-| `dataStorageType` | string \| null | optional, `SCP`; defaults to `SCP` |
+| `dataStorageType` | string \| null | optional, `SCP` or `S3`; defaults to `SCP`. On S3, `path` is an object key and follows the [replica key rules](#data-product-replicas) |
 
 There is no `ownerId` and no `provisionStatus`: ownership comes from the token, and the lifecycle state is the server's to move. A body carrying either is accepted and ignored.
 
@@ -1490,7 +1490,9 @@ POST   /api/v1/data-products/{dataProductId}/replicas               (WRITE)
 DELETE /api/v1/data-products/{dataProductId}/replicas/{replicaId}   (WRITE)
 ```
 
-The **primary** replica is the location in the product's own `dataStorageId`, `dataStorageType` and `path`. It is created with the product and moves when the product is updated, so it cannot be added or removed here. Job launches and the content endpoint use the primary location, which is why it must still be an SCP storage. [S3 data storages](#s3-data-storages) can be named by secondary replicas.
+The **primary** replica is the location in the product's own `dataStorageId`, `dataStorageType` and `path`. It is created with the product and moves when the product is updated, so it cannot be added or removed here. Either kind of replica may be on an SCP or an [S3](#s3-data-storages) storage.
+
+When a run is launched, a file input is staged from the product's first replica — the primary one, or the oldest replica when the product has no primary — and a file output is staged to the product's primary location. Every copy goes through the server, so a cluster only ever receives data over SCP and never sees an S3 credential. The [content endpoint](#upload-and-download-data-product-content) still reads and writes the primary location on SCP only: for a product on S3 it answers `400 Bad Request`.
 
 Adding a replica needs `WRITE` on the product and `READ` on the storage it names, the same rule as registering a product on that storage. It records where the data is and does not copy anything.
 
@@ -2069,7 +2071,7 @@ curl -s -X POST localhost:9095/api/v1/processes/"$PROCESS_ID"/data-staging-tasks
 | `sourcePath` | string | required, cannot be blank. A single path, or a JSON array of paths |
 | `destinationPath` | string | required, cannot be blank |
 | `sourceDataStorageId` / `destinationDataStorageId` | string \| null | optional. Each end is a [storage](#scp-data-storages), which carries the host, the login user and the key it is reached under — so there is no separate credential to name |
-| `sourceDataStorageType` / `destinationDataStorageType` | string \| null | optional, one of `SCP`, `S3` |
+| `sourceDataStorageType` / `destinationDataStorageType` | string \| null | optional, one of `SCP`, `HPC`, `S3`. `HPC` is a cluster config's head node; on `S3` the path is an object key. Every copy passes through the server, so an S3 credential never reaches the cluster |
 
 **Response — `201 Created`**
 

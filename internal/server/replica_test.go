@@ -280,27 +280,3 @@ func TestDeletingAProductDeletesItsReplicas(t *testing.T) {
 	}
 	h.mustDo(http.MethodDelete, "/api/v1/s3-data-storages/"+s3StorageID, tokenAlice, nil, http.StatusNoContent)
 }
-
-// The primary location is what launches and the content endpoint read, and neither can
-// act on S3 yet, so S3 can only be a secondary location for now.
-func TestS3CannotBeAProductsPrimaryLocation(t *testing.T) {
-	h := newHarness(t)
-	_, s3StorageID := h.seedS3Storage("primary-s3", tokenAlice)
-	rec := h.do(http.MethodPost, "/api/v1/data-products", tokenAlice, map[string]any{
-		"dataName": "run", "isFile": true, "path": "runs/run", "dataStorageId": s3StorageID, "dataStorageType": "S3",
-	})
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("product with an S3 primary: status = %d, want 400", rec.Code)
-	}
-}
-
-// A staging task naming S3 would do nothing and report success until copyData handles it.
-func TestS3IsNotYetAStagingStorageType(t *testing.T) {
-	h := newHarness(t)
-	processID := h.seedProcess("no-s3-staging", tokenAlice)
-	rec := h.do(http.MethodPost, "/api/v1/processes/"+processID+"/data-staging-tasks", tokenAlice,
-		map[string]any{"sourcePath": "/in", "destinationPath": "/out", "sourceDataStorageType": "S3"})
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("staging task naming S3: status = %d, want 400", rec.Code)
-	}
-}

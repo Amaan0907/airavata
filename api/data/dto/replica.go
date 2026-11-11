@@ -58,7 +58,7 @@ func (r *DataProductReplicaRequest) Validate() []httpx.FieldError {
 	var c httpx.Constraints
 	c.NotBlank("dataStorageId", "Data storage id cannot be blank", r.DataStorageID)
 	c.NotBlank("path", "Path cannot be blank", r.Path)
-	if !r.StorageType().ValidForReplica() {
+	if !r.StorageType().ValidLocation() {
 		c.Add("dataStorageType", "Data storage type must be one of SCP, S3")
 	}
 	if len(r.Path) > maxReplicaPathLength {

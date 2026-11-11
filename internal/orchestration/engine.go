@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/apache/airavata/internal/objectstore"
 	internalptr "github.com/apache/airavata/internal/ptr"
 	"github.com/cschleiden/go-workflows/backend"
 	"github.com/cschleiden/go-workflows/client"
@@ -48,6 +49,7 @@ type ExecutionEngine struct {
 	jobSubmissionTasks  *processrepo.JobSubmissionTaskRepository
 	jobMonitoringTasks  *processrepo.JobMonitoringTaskRepository
 	scpStorages         *datastorerepo.SCPDataStorageRepository
+	s3Storages          *datastorerepo.S3DataStorageRepository
 	slurmClusterConfigs *computerepo.SlurmClusterConfigRepository
 	processes           *processrepo.ProcessRepository
 	batchDeployments    *applicationrepo.BatchDeploymentRepository
@@ -55,6 +57,10 @@ type ExecutionEngine struct {
 	orchestrator        *worker.WorkflowOrchestrator
 	batchStatus         *processrepo.BatchJobStatusRepository
 	processStatus       *processrepo.StatusRepository
+
+	// openObjectStore opens the bucket an S3 data storage names. It is a field so a test
+	// can stand a fake store in for a real one.
+	openObjectStore func(objectstore.Config) (objectstore.Store, error)
 }
 
 type GlobalJobConfigs struct {
@@ -84,6 +90,7 @@ func NewExecutionEngine(dataStagingTasks *processrepo.DataStagingTaskRepository,
 	jobSubmissionTasks *processrepo.JobSubmissionTaskRepository,
 	jobMonitoringTasks *processrepo.JobMonitoringTaskRepository,
 	scpStorages *datastorerepo.SCPDataStorageRepository,
+	s3Storages *datastorerepo.S3DataStorageRepository,
 	slurmClusterConfigs *computerepo.SlurmClusterConfigRepository,
 	processes *processrepo.ProcessRepository,
 	batchDeployments *applicationrepo.BatchDeploymentRepository,
@@ -105,6 +112,7 @@ func NewExecutionEngine(dataStagingTasks *processrepo.DataStagingTaskRepository,
 		jobSubmissionTasks:  jobSubmissionTasks,
 		jobMonitoringTasks:  jobMonitoringTasks,
 		scpStorages:         scpStorages,
+		s3Storages:          s3Storages,
 		slurmClusterConfigs: slurmClusterConfigs,
 		processes:           processes,
 		batchDeployments:    batchDeployments,
@@ -112,6 +120,7 @@ func NewExecutionEngine(dataStagingTasks *processrepo.DataStagingTaskRepository,
 		orchestrator:        orchestrator,
 		batchStatus:         batchStatus,
 		processStatus:       processStatus,
+		openObjectStore:     openS3Store,
 	}
 }
 

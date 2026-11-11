@@ -37,19 +37,20 @@ const (
 	DataStorageTypeS3  DataStorageType = "S3"
 )
 
-// Valid reports whether t may be named by a product's primary location or a staging
-// task. S3 is deliberately absent until staging can act on it: a task naming a type
-// copyData does not handle would do nothing and still report success.
+// Valid reports whether t may be named by either end of a data staging task. HPC names
+// a cluster config's head node, which is where staged inputs land and outputs come from.
 func (t DataStorageType) Valid() bool {
 	switch t {
-	case DataStorageTypeSCP, DataStorageTypeHPC:
+	case DataStorageTypeSCP, DataStorageTypeHPC, DataStorageTypeS3:
 		return true
 	}
 	return false
 }
 
-// ValidForReplica reports whether t may be named by a data product replica.
-func (t DataStorageType) ValidForReplica() bool {
+// ValidLocation reports whether t may be where a data product lives: a product's
+// primary location or one of its replicas. A cluster is somewhere data is staged to for
+// a run, not a storage a product is registered on.
+func (t DataStorageType) ValidLocation() bool {
 	switch t {
 	case DataStorageTypeSCP, DataStorageTypeS3:
 		return true

@@ -98,7 +98,7 @@ func (s *DataProductReplicaService) Add(ctx context.Context, productID string, r
 			return err
 		}
 		storageType := req.StorageType()
-		if err := s.requireStorageReachable(ctx, tx, storageType, req.DataStorageID); err != nil {
+		if err := requireLocationReadable(ctx, tx, s.access, s.sharing, s.scpStorages, s.s3Storages, storageType, req.DataStorageID); err != nil {
 			return err
 		}
 
@@ -154,13 +154,24 @@ func (s *DataProductReplicaService) Remove(ctx context.Context, productID, repli
 	})
 }
 
-// requireStorageReachable checks that the storage exists and the caller holds READ on
-// it. The id carries no foreign key, so this is what keeps a replica from dangling.
-func (s *DataProductReplicaService) requireStorageReachable(ctx context.Context, tx *gorm.DB, storageType model.DataStorageType, storageID string) error {
-	base, sharing := s.access.WithTx(tx), s.sharing.WithTx(tx)
+// requireLocationReadable checks that the storage a product location names exists and
+// the caller holds READ on it, for a product's primary location and its replicas alike.
+// The id carries no foreign key, so this is what keeps a location from dangling, and
+// what stops the platform being pointed at a storage nobody shared with the caller.
+func requireLocationReadable(
+	ctx context.Context,
+	tx *gorm.DB,
+	baseAccess access,
+	sharingRepo *sharingrepo.Repository,
+	scpStorages *repository.SCPDataStorageRepository,
+	s3Storages *repository.S3DataStorageRepository,
+	storageType model.DataStorageType,
+	storageID string,
+) error {
+	base, sharing := baseAccess.WithTx(tx), sharingRepo.WithTx(tx)
 
 	if storageType == model.DataStorageTypeS3 {
-		storage, err := s.s3Storages.WithTx(tx).FindByID(ctx, storageID)
+		storage, err := s3Storages.WithTx(tx).FindByID(ctx, storageID)
 		if err != nil {
 			return notFoundAs(err, "S3 data storage not found: %s", storageID)
 		}
@@ -169,7 +180,7 @@ func (s *DataProductReplicaService) requireStorageReachable(ctx context.Context,
 		return err
 	}
 
-	storage, err := s.scpStorages.WithTx(tx).FindByID(ctx, storageID)
+	storage, err := scpStorages.WithTx(tx).FindByID(ctx, storageID)
 	if err != nil {
 		return notFoundAs(err, "SCP data storage not found: %s", storageID)
 	}

@@ -48,14 +48,19 @@ func (r *DataProductRequest) Validate() []httpx.FieldError {
 	c.NotNil("isFile", "isFile cannot be null", r.IsFile)
 	c.NotBlankPtr("path", "Path cannot be blank", r.Path)
 	c.NotBlank("dataStorageId", "Data storage id cannot be blank", r.DataStorageID)
-	if r.DataStorageType != nil && !r.DataStorageType.Valid() {
-		c.Add("dataStorageType", "Data storage type must be SCP")
+	if r.DataStorageType != nil && !r.DataStorageType.ValidLocation() {
+		c.Add("dataStorageType", "Data storage type must be one of SCP, S3")
+	}
+	if r.StorageType() == model.DataStorageTypeS3 && r.Path != nil && *r.Path != "" {
+		if msg := objectKeyProblem(*r.Path); msg != "" {
+			c.Add("path", msg)
+		}
 	}
 	return c.Fields()
 }
 
-// StorageType returns the requested storage type, defaulting to SCP — the only kind
-// there is so far, and the only kind dataStorageId can resolve against.
+// StorageType returns the requested storage type, defaulting to SCP so that requests
+// written before S3 storages existed keep their meaning.
 func (r *DataProductRequest) StorageType() model.DataStorageType {
 	if r.DataStorageType == nil {
 		return model.DataStorageTypeSCP

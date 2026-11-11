@@ -52,7 +52,7 @@ func taskCommon(c *httpx.Constraints, onFailure *model.OnFailureAction, retryCou
 
 func validateStorageType(c *httpx.Constraints, field string, t *data.DataStorageType) {
 	if t != nil && !t.Valid() {
-		c.Add(field, "Data storage type must be one of SCP, S3")
+		c.Add(field, "Data storage type must be one of SCP, HPC, S3")
 	}
 }
 
